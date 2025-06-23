@@ -1,0 +1,172 @@
+<!--
+SITUAÇÃO-PROBLEMA 2: MONITOR DE CHAMADOS DE SOCORRO POR ÁUDIO
+
+Problema:
+Uma residente pode precisar de assistência médica ou ajuda, mas pode estar incapacitada
+de alcançar um botão de emergência ou de gritar por socorro. No entanto, ela ainda
+pode ser capaz de emitir sons de mal-estar, como uma tosse forte, ou falar a palavra
+"ajuda" em voz baixa.
+
+Solução Proposta:
+Esta página web implementa um "ouvido eletrônico" que utiliza o microfone do navegador
+para monitorar o áudio do ambiente. Um modelo de IA (treinado no Teachable Machine)
+analisa o som em tempo real. Se ele detectar sons pré-definidos como de emergência
+("Pedido de Ajuda" ou "Tosse"), ele dispara um alerta visual imediato na tela.
+Em uma implementação real, este alerta seria integrado a um sistema de notificação
+central da equipe de enfermagem.
+-->
+
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitor de Áudio - Lar de Idosas</title>
+    <!-- Importa a biblioteca do Tailwind CSS para estilização rápida -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Estilo para a transição suave de cor de fundo */
+        body {
+            transition: background-color 0.5s ease;
+        }
+
+        /* Classe para o alerta visual */
+        .alerta-bg {
+            background-color: #ef4444;
+            /* Vermelho */
+        }
+
+        .alerta-text {
+            color: white;
+            border-color: #f87171;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen font-sans">
+
+    <div id="container" class="bg-white p-8 rounded-lg shadow-xl max-w-lg w-full text-center">
+        <h1 class="text-3xl font-bold text-gray-800 mb-4">Monitor de Chamados de Socorro</h1>
+        <p id="instrucao" class="text-gray-600 mb-6">Pressione "Iniciar Monitoramento" para ativar o microfone e começar
+            a ouvir o ambiente.</p>
+
+        <button id="start-button"
+            class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg text-lg transition-transform transform hover:scale-105">
+            Iniciar Monitoramento
+        </button>
+
+        <div id="status-area" class="mt-8 hidden">
+            <h2 class="text-xl font-semibold text-gray-700">Status Atual</h2>
+            <div id="label-container" class="mt-4 text-2xl p-4 rounded-lg bg-gray-200">
+                Aguardando som...
+            </div>
+            <p class="text-sm text-gray-500 mt-2">Pressione 'q' no teclado para parar.</p>
+        </div>
+
+        <div id="alerta-visual" class="hidden mt-6 p-4 bg-red-100 border-l-4 border-red-500 text-red-700">
+            <p class="font-bold">ALERTA!</p>
+            <p>Um som de emergência foi detectado. Notificando a equipe.</p>
+        </div>
+    </div>
+
+    <!-- CORREÇÃO: Importando as bibliotecas TensorFlow.js e Speech-Commands corretas -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script
+        src="https://cdn.jsdelivr.net/npm/@tensorflow-models/speech-commands@latest/dist/speech-commands.min.js"></script>
+
+    <script type="text/javascript">
+        // Link para o seu modelo do Teachable Machine
+        // Importante: Este link deve apontar para a pasta do modelo
+        const URL = "https://teachablemachine.withgoogle.com/models/lmhvRpbNu/"; // <<< COLOQUE O SEU LINK AQUI
+
+        let recognizer; // Não precisamos de 'model' e 'maxPredictions' globais nesta versão
+        const startButton = document.getElementById('start-button');
+        const statusArea = document.getElementById('status-area');
+        const instrucao = document.getElementById('instrucao');
+        const alertaVisual = document.getElementById('alerta-visual');
+        const labelContainer = document.getElementById("label-container");
+
+        async function init() {
+            instrucao.textContent = "Carregando modelo...";
+            startButton.classList.add('hidden');
+
+            const checkpointURL = URL + "model.json";
+            const metadataURL = URL + "metadata.json";
+
+            // CORREÇÃO: Criando o reconhecedor com a nova biblioteca
+            recognizer = speechCommands.create(
+                "BROWSER_FFT",
+                undefined,
+                checkpointURL,
+                metadataURL);
+
+            try {
+                // Garante que o modelo está carregado
+                await recognizer.ensureModelLoaded();
+
+                // Mostra a área de status e começa a ouvir
+                statusArea.classList.remove('hidden');
+                instrucao.textContent = "Modelo carregado. Ouvindo o ambiente...";
+
+                // Inicia o loop de escuta
+                recognizer.listen(result => {
+                    const scores = result.scores; // As probabilidades de cada classe
+                    const wordLabels = recognizer.wordLabels(); // Os nomes das classes
+
+                    // Encontra a classe com a maior probabilidade
+                    let maxScore = -1;
+                    let maxIndex = -1;
+                    for (let i = 0; i < wordLabels.length; i++) {
+                        if (scores[i] > maxScore) {
+                            maxScore = scores[i];
+                            maxIndex = i;
+                        }
+                    }
+                    const classPrediction = wordLabels[maxIndex];
+                    displayPrediction(classPrediction, maxScore);
+
+                }, {
+                    includeSpectrogram: true,
+                    probabilityThreshold: 0.90, // Só considera predições com mais de 90% de confiança
+                    invokeCallbackOnNoiseAndUnknown: true,
+                    overlapFactor: 0.50
+                });
+
+            } catch (error) {
+                instrucao.textContent = "Erro ao carregar ou iniciar o modelo. Verifique o console.";
+                console.error("Erro no reconhecimento de fala:", error);
+            }
+        }
+
+        function displayPrediction(prediction, confidence) {
+            const classesDeAlerta = ['Pedido de Ajuda', 'Tosse'];
+
+            if (classesDeAlerta.includes(prediction)) {
+                labelContainer.innerHTML = `ALERTA: ${prediction} (${(confidence * 100).toFixed(1)}%)`;
+                document.body.classList.add('alerta-bg');
+                labelContainer.classList.add('alerta-text', 'bg-red-600');
+                alertaVisual.classList.remove('hidden');
+            } else {
+                labelContainer.innerHTML = `Som detectado: ${prediction}`;
+                document.body.classList.remove('alerta-bg');
+                labelContainer.classList.remove('alerta-text', 'bg-red-600');
+                alertaVisual.classList.add('hidden');
+            }
+        }
+
+        startButton.addEventListener('click', init);
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'q' && recognizer && recognizer.isListening()) {
+                recognizer.stopListening();
+                instrucao.textContent = "Monitoramento parado pelo usuário.";
+                statusArea.classList.add('hidden');
+                startButton.classList.remove('hidden');
+                startButton.textContent = "Reiniciar Monitoramento";
+            }
+        });
+    </script>
+</body>
+
+</html>
